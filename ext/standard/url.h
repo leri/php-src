@@ -58,6 +58,19 @@ PHP_FUNCTION(get_headers);
 #define PHP_QUERY_RFC1738 1
 #define PHP_QUERY_RFC3986 2
 
+#define PHP_URL_SCHEME_KEY "scheme"
+#define PHP_URL_HOST_KEY "host"
+#define PHP_URL_PORT_KEY "port"
+#define PHP_URL_USER_KEY "user"
+#define PHP_URL_PASS_KEY "pass"
+#define PHP_URL_PATH_KEY "path"
+#define PHP_URL_QUERY_KEY "query"
+#define PHP_URL_FRAGMENT_KEY "fragment"
+
+#define PHP_URL_IPv4 0
+#define PHP_URL_IPv6 1
+
+
 #endif /* URL_H */
 
 /*
