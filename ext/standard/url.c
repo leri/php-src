@@ -427,23 +427,226 @@ PHP_FUNCTION(parse_url)
 
     /* add the various elements to the array */
 	if (resource->scheme != NULL)
-		add_assoc_string(return_value, "scheme", resource->scheme, 1);
+		add_assoc_string(return_value, PHP_URL_SCHEME_KEY, resource->scheme, 1);
 	if (resource->host != NULL)
-		add_assoc_string(return_value, "host", resource->host, 1);
+		add_assoc_string(return_value, PHP_URL_HOST_KEY, resource->host, 1);
 	if (resource->port != 0)
-		add_assoc_long(return_value, "port", resource->port);
+		add_assoc_long(return_value, PHP_URL_PORT_KEY, resource->port);
 	if (resource->user != NULL)
-		add_assoc_string(return_value, "user", resource->user, 1);
+		add_assoc_string(return_value, PHP_URL_USER_KEY, resource->user, 1);
 	if (resource->pass != NULL)
-		add_assoc_string(return_value, "pass", resource->pass, 1);
+		add_assoc_string(return_value, PHP_URL_PASS_KEY, resource->pass, 1);
 	if (resource->path != NULL)
-		add_assoc_string(return_value, "path", resource->path, 1);
+		add_assoc_string(return_value, PHP_URL_PATH_KEY, resource->path, 1);
 	if (resource->query != NULL)
-		add_assoc_string(return_value, "query", resource->query, 1);
+		add_assoc_string(return_value, PHP_URL_QUERY_KEY, resource->query, 1);
 	if (resource->fragment != NULL)
-		add_assoc_string(return_value, "fragment", resource->fragment, 1);
+		add_assoc_string(return_value, PHP_URL_FRAGMENT_KEY, resource->fragment, 1);
 done:	
 	php_url_free(resource);
+}
+/* }}} */
+
+static int php_url_get_str_part(char **part, char *key, long key_len, HashTable *parts) {
+	zval **zv_part;
+
+	if (zend_hash_find(parts, key, key_len, (void**)&zv_part) == SUCCESS) {
+		if (Z_TYPE_PP(zv_part) != IS_STRING) {
+			zend_error(E_WARNING, "%s should be string.", key);
+			return FAILURE;
+		}
+
+		*part = Z_STRVAL_PP(zv_part);
+	} else {
+		*part = NULL;
+	}
+
+	return SUCCESS;
+}
+
+/* {{{ php_combine_url
+*/
+PHPAPI int php_combine_url(smart_str *res, char *scheme, char *host, long port, char *user, char *pass, char *path, HashTable *query, char *fragment, int ip_version, long enc_type) {
+	if (host != NULL) {
+		if (scheme != NULL) { // TODO validate scheme for validity.
+			smart_str_appendl(res, scheme, strlen(scheme));
+			smart_str_appendc(res, ':');
+		}
+
+		smart_str_appendl(res, "//", strlen("//"));
+
+		if (user != NULL) {
+			int user_len;
+			user = php_url_encode_by_type(user, strlen(user), &user_len, enc_type);
+			smart_str_appendl(res, user, user_len);
+
+			if (pass != NULL) {
+				smart_str_appendc(res, ':');
+				int pass_len;
+				pass = php_url_encode_by_type(pass, strlen(pass), &pass_len, enc_type);
+				smart_str_appendl(res, pass, pass_len);
+			}
+
+			smart_str_appendc(res, '@');
+		}
+
+		if (ip_version == PHP_URL_IPv6) {
+			smart_str_appendc(res, '[');
+		}
+
+		smart_str_appendl(res, host, strlen(host));
+
+		if (ip_version == PHP_URL_IPv6) {
+			smart_str_appendc(res, ']');
+		}
+
+		if (port > -1) {
+			smart_str_appendc(res, ':');
+			char port_str[128]; // large enough for 64 bit numbers.
+			sprintf(port_str, "%lu", port);
+			smart_str_appendl(res, port_str, strlen(port_str));
+		}
+	}
+
+	if (path != NULL) {
+		char *path_tmp = estrdup(path);
+		char *path_delimiter_str = "/";
+		char path_delimiter = '/';
+		char *path_part = strtok(path_tmp, path_delimiter_str);
+
+		while (path_part != NULL) {
+			smart_str_appendc(res, path_delimiter);
+
+			int path_part_len;
+			path_part = php_url_encode_by_type(path_part, strlen(path_part), &path_part_len, enc_type);
+			smart_str_appendl(res, path_part, path_part_len);
+
+			path_part = strtok(NULL, path_delimiter_str);
+		}
+		
+		efree(path_tmp);
+	}
+
+	if (query != NULL) {
+		smart_str_appendc(res, '?');
+
+		smart_str query_res = {0};
+
+		if (php_url_encode_hash_ex(query, &query_res, NULL, 0, NULL, 0, NULL, 0, NULL, NULL, enc_type TSRMLS_CC) == FAILURE) {
+			if (query_res.c) {
+				efree(query_res.c);
+			}
+			return FAILURE;
+		}
+
+		smart_str_append(res, &query_res);
+	}
+
+	if (fragment != NULL) {
+		smart_str_appendc(res, '#');
+		int fragment_len;
+		fragment = php_url_encode_by_type(fragment, strlen(fragment), &fragment_len, enc_type);
+		smart_str_appendl(res, fragment, fragment_len);
+	}
+
+	return SUCCESS;
+}
+/* }}} */
+
+/* {{{ proto mixed parse_url(string url, [int ip_version, int enc_type])
+   Combines URL parts and returns valid url */
+PHP_FUNCTION(combine_url) {
+	HashTable *parts;
+	long ip_version = PHP_URL_IPv4;
+	long enc_type = PHP_QUERY_RFC1738;
+	zval **zv_port;
+	zval **zv_query;
+	char *scheme;
+	char *host;
+	long port = -1;
+	char *user;
+	char *pass;
+	char *path;
+	HashTable *query = NULL;
+	char *fragment;
+	smart_str res = {0};
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "h|ll", &parts, &ip_version, &enc_type) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (php_url_get_str_part(&scheme, PHP_URL_SCHEME_KEY, sizeof(PHP_URL_SCHEME_KEY), parts) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (php_url_get_str_part(&host, PHP_URL_HOST_KEY, sizeof(PHP_URL_HOST_KEY), parts) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (php_url_get_str_part(&user, PHP_URL_USER_KEY, sizeof(PHP_URL_USER_KEY), parts) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (php_url_get_str_part(&pass, PHP_URL_PASS_KEY, sizeof(PHP_URL_PASS_KEY), parts) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (php_url_get_str_part(&path, PHP_URL_PATH_KEY, sizeof(PHP_URL_PATH_KEY), parts) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (php_url_get_str_part(&fragment, PHP_URL_FRAGMENT_KEY, sizeof(PHP_URL_FRAGMENT_KEY), parts) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (zend_hash_find(parts, PHP_URL_PORT_KEY, sizeof(PHP_URL_PORT_KEY), (void**)&zv_port) == SUCCESS) {
+		zval tmp_port;
+		ZVAL_COPY_VALUE(&tmp_port, *zv_port);
+		zval_copy_ctor(&tmp_port);
+		convert_to_long(&tmp_port);
+		port = Z_LVAL(tmp_port);
+		zval_dtor(&tmp_port);
+	}
+
+	if (zend_hash_find(parts, PHP_URL_QUERY_KEY, sizeof(PHP_URL_QUERY_KEY), (void**)&zv_query) == SUCCESS) {
+		switch (Z_TYPE_PP(zv_query)) {
+			case IS_STRING:
+				// TODO: invoke sapi module.
+				break;
+			case IS_ARRAY:
+			case IS_OBJECT:
+				query = HASH_OF(*zv_query);
+				break;
+			default:
+				zend_error(E_WARNING, "Invalid type passed for query");
+				break;
+		}
+	}
+
+	if (php_combine_url(&res, scheme, host, port, user, pass, path, query, fragment, ip_version, enc_type) == FAILURE) {
+		if (res.c) {
+			efree(res.c);
+		}
+		RETURN_FALSE;
+	}
+
+	smart_str_0(&res);
+
+	RETURN_STRINGL(res.c, res.len, 0);
+}
+/* }}} */
+
+/* {{{ php_url_encode_by_type
+*/
+PHPAPI char *php_url_encode_by_type(char const *s, int len, int *new_length, long enc_type) {
+	switch (enc_type) {
+		case PHP_QUERY_RFC1738:
+			return php_url_encode(s, len, new_length);
+		case PHP_QUERY_RFC3986:
+			return php_raw_url_encode(s, len, new_length);
+	}
+
+	return NULL;
 }
 /* }}} */
 

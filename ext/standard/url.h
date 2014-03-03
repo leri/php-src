@@ -20,6 +20,8 @@
 #ifndef URL_H
 #define URL_H
 
+#include "php_smart_str.h"
+
 typedef struct php_url {
 	char *scheme;
 	char *user;
@@ -34,12 +36,15 @@ typedef struct php_url {
 PHPAPI void php_url_free(php_url *theurl);
 PHPAPI php_url *php_url_parse(char const *str);
 PHPAPI php_url *php_url_parse_ex(char const *str, int length);
+PHPAPI int php_combine_url(smart_str *res, char *scheme, char *host, long port, char *user, char *pass, char *path, HashTable *query, char *fragment, int ip_version, long enc_type);
 PHPAPI int php_url_decode(char *str, int len); /* return value: length of decoded string */
 PHPAPI int php_raw_url_decode(char *str, int len); /* return value: length of decoded string */
 PHPAPI char *php_url_encode(char const *s, int len, int *new_length);
 PHPAPI char *php_raw_url_encode(char const *s, int len, int *new_length);
+PHPAPI char *php_url_encode_by_type(char const *s, int len, int *new_length, long enc_type);
 
 PHP_FUNCTION(parse_url);
+PHP_FUNCTION(combine_url);
 PHP_FUNCTION(urlencode);
 PHP_FUNCTION(urldecode);
 PHP_FUNCTION(rawurlencode);
