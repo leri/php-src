@@ -42,6 +42,7 @@ PHPAPI int php_raw_url_decode(char *str, int len); /* return value: length of de
 PHPAPI char *php_url_encode(char const *s, int len, int *new_length);
 PHPAPI char *php_raw_url_encode(char const *s, int len, int *new_length);
 PHPAPI char *php_url_encode_by_type(char const *s, int len, int *new_length, long enc_type);
+PHPAPI char *php_url_get_encoded_property(zval *instance, const char *name, int name_length, int *new_length);
 
 PHP_FUNCTION(parse_url);
 PHP_FUNCTION(combine_url);
@@ -50,6 +51,40 @@ PHP_FUNCTION(urldecode);
 PHP_FUNCTION(rawurlencode);
 PHP_FUNCTION(rawurldecode);
 PHP_FUNCTION(get_headers);
+
+zend_class_entry *url_ce;
+
+PHP_MINIT_FUNCTION(url);
+PHP_METHOD(Url, __toString);
+PHP_METHOD(Url, getEncType);
+PHP_METHOD(Url, getIpVersion);
+PHP_METHOD(Url, getScheme);
+PHP_METHOD(Url, getUser);
+PHP_METHOD(Url, getRawUser);
+PHP_METHOD(Url, getPass);
+PHP_METHOD(Url, getRawPass);
+PHP_METHOD(Url, getHost);
+PHP_METHOD(Url, getPort);
+PHP_METHOD(Url, getPath);
+PHP_METHOD(Url, getRawPath);
+PHP_METHOD(Url, getQueryString);
+PHP_METHOD(Url, getQueryVariables);
+PHP_METHOD(Url, getQueryVariable);
+PHP_METHOD(Url, getFragment);
+PHP_METHOD(Url, getRawFragment);
+PHP_METHOD(Url, setEncType);
+PHP_METHOD(Url, setIpVersion);
+PHP_METHOD(Url, setScheme);
+PHP_METHOD(Url, setUser);
+PHP_METHOD(Url, setPass);
+PHP_METHOD(Url, setHost);
+PHP_METHOD(Url, setPort);
+PHP_METHOD(Url, setPath);
+PHP_METHOD(Url, setQuery);
+PHP_METHOD(Url, setFragment);
+
+#define PHP_URL_GET_ENCTYPE(ce, instance) Z_LVAL_P(zend_read_property(ce, instance, "encType", sizeof("enctype") - 1, 0 TSRMLS_CC))
+	
 
 #define PHP_URL_SCHEME 0
 #define PHP_URL_HOST 1

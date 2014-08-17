@@ -23,6 +23,7 @@
 #include <sys/types.h>
 
 #include "php.h"
+#include "php_variables.h"
 
 #include "url.h"
 #include "file.h"
@@ -610,8 +611,12 @@ PHP_FUNCTION(combine_url) {
 
 	if (zend_hash_find(parts, PHP_URL_QUERY_KEY, sizeof(PHP_URL_QUERY_KEY), (void**)&zv_query) == SUCCESS) {
 		switch (Z_TYPE_PP(zv_query)) {
-			case IS_STRING:
-				// TODO: invoke sapi module.
+			case IS_STRING: ;
+				zval tmp;
+				char *query_str = estrdup(Z_STRVAL_PP(zv_query));
+				array_init(&tmp);
+				sapi_module.treat_data(PARSE_STRING, query_str, &tmp TSRMLS_CC);
+				query = HASH_OF(&tmp);
 				break;
 			case IS_ARRAY:
 			case IS_OBJECT:
@@ -647,6 +652,25 @@ PHPAPI char *php_url_encode_by_type(char const *s, int len, int *new_length, lon
 	}
 
 	return NULL;
+}
+/* }}} */
+
+/** {{{ php_url_get_encoded_property
+*/
+PHPAPI char *php_url_get_encoded_property(zval *instance, const char *name, int name_length, int *new_length) {
+	zval *zv_prop;
+	char *prop;
+	long encType = PHP_URL_GET_ENCTYPE(url_ce, instance);
+
+	zv_prop = zend_read_property(url_ce, instance, name, name_length, 1 TSRMLS_CC);
+
+	if (!zv_prop || Z_TYPE_P(zv_prop) != IS_STRING) {
+		return NULL;
+	}
+
+	prop = Z_STRVAL_P(zv_prop);
+
+	return php_url_encode_by_type(prop, strlen(prop), new_length, encType);
 }
 /* }}} */
 
@@ -977,6 +1001,510 @@ no_name_header:
 	php_stream_close(stream);
 }
 /* }}} */
+
+/** URL class */
+PHP_METHOD(Url, __toString)
+{
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	RETURN_STRING("Bar\n", 1);
+}
+
+PHP_METHOD(Url, getEncType)
+{
+	zval *instance, *encType;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	encType = zend_read_property(url_ce, instance, "encType", sizeof("enctype") - 1, 0 TSRMLS_CC);
+
+	RETURN_ZVAL(encType, 1, 0);
+}
+
+PHP_METHOD(Url, getIpVersion)
+{
+	zval *instance, *ipVersion;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	ipVersion = zend_read_property(url_ce, instance, "ipVersion", sizeof("ipVersion") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(ipVersion, 1, 0);
+}
+
+PHP_METHOD(Url, getScheme)
+{
+	zval *instance, *scheme;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	scheme = zend_read_property(url_ce, instance, "scheme", sizeof("scheme") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(scheme, 1, 0);
+}
+
+PHP_METHOD(Url, getUser)
+{
+	zval *instance;
+	char *user;
+	int length;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	user = php_url_get_encoded_property(instance, "user", sizeof("user") - 1, &length);
+
+	if (user == NULL) {
+		RETURN_NULL();
+	}
+
+	RETURN_STRINGL(user, length, 0);
+}
+
+PHP_METHOD(Url, getRawUser)
+{
+	zval *instance, *user;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	user = zend_read_property(url_ce, instance, "user", sizeof("user") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(user, 1, 0);
+}
+
+PHP_METHOD(Url, getPass)
+{
+	zval *instance;
+	char *pass;
+	int length;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	pass = php_url_get_encoded_property(instance, "pass", sizeof("pass") - 1, &length);
+
+	if (pass == NULL) {
+		RETURN_NULL();
+	}
+
+	RETURN_STRINGL(pass, length, 0);
+}
+
+PHP_METHOD(Url, getRawPass)
+{
+	zval *instance, *pass;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	pass = zend_read_property(url_ce, instance, "pass", sizeof("pass") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(pass, 1, 0);
+}
+
+PHP_METHOD(Url, getHost)
+{
+	zval *instance, *host;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	host = zend_read_property(url_ce, instance, "host", sizeof("host") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(host, 1, 0);
+}
+
+PHP_METHOD(Url, getPort)
+{
+	zval *instance, *port;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	port = zend_read_property(url_ce, instance, "port", sizeof("port") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(port, 1, 0);
+}
+
+PHP_METHOD(Url, getPath)
+{
+	zval *instance, *zv_path;
+	char *path;
+	smart_str res = {0};
+	long encType;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	zv_path = zend_read_property(url_ce, instance, "path", sizeof("path") - 1, 1 TSRMLS_CC);
+	
+	if (!zv_path || Z_TYPE_P(zv_path) != IS_STRING) {
+		RETURN_NULL();
+	}
+
+	encType = PHP_URL_GET_ENCTYPE(url_ce, instance);
+	path = Z_STRVAL_P(zv_path);
+	char *path_tmp = estrdup(path);
+	char *path_delimiter_str = "/";
+	char path_delimiter = '/';
+	char *path_part = strtok(path_tmp, path_delimiter_str);
+
+	while (path_part != NULL) {
+		smart_str_appendc(&res, path_delimiter);
+
+		int path_part_len;
+		path_part = php_url_encode_by_type(path_part, strlen(path_part), &path_part_len, encType);
+		smart_str_appendl(&res, path_part, path_part_len);
+		path_part = strtok(NULL, path_delimiter_str);
+	}
+
+	efree(path_tmp);
+
+	RETURN_STRINGL(res.c, res.len, 0);
+}
+
+PHP_METHOD(Url, getRawPath)
+{
+	zval *instance, *path;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	path = zend_read_property(url_ce, instance, "path", sizeof("path") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(path, 1, 0);
+}
+
+PHP_METHOD(Url, getQueryString)
+{
+}
+
+PHP_METHOD(Url, getQueryVariables)
+{
+	zval *instance, *queryVariables;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	queryVariables = zend_read_property(url_ce, instance, "queryVariables", sizeof("queryVariables") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(queryVariables, 1, 0);
+}
+
+PHP_METHOD(Url, getQueryVariable)
+{
+}
+
+PHP_METHOD(Url, getFragment)
+{
+	zval *instance;
+	char *fragment;
+	int length;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	fragment = php_url_get_encoded_property(instance, "fragment", sizeof("fragment") - 1, &length);
+
+	if (fragment == NULL) {
+		RETURN_NULL();
+	}
+
+	RETURN_STRINGL(fragment, length, 0);
+}
+
+PHP_METHOD(Url, getRawFragment)
+{
+	zval *instance, *fragment;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	fragment = zend_read_property(url_ce, instance, "fragment", sizeof("fragment") - 1, 1 TSRMLS_CC);
+
+	RETURN_ZVAL(fragment, 1, 0);
+}
+
+PHP_METHOD(Url, setEncType)
+{
+	zval *instance;
+	long encType;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &encType) == FAILURE) {
+		return;
+	}
+
+	if (encType != PHP_QUERY_RFC1738 && encType != PHP_QUERY_RFC3986) {
+		zend_throw_exception(NULL, "Invalid encoding type was passed", 0);
+	}
+
+	instance = getThis();
+	zend_update_property_long(url_ce, instance, "encType", sizeof("encType") - 1, encType TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setIpVersion)
+{
+	zval *instance;
+	long ipVersion;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &ipVersion) == FAILURE) {
+		return;
+	}
+
+	if (ipVersion != PHP_URL_IPv4 && ipVersion != PHP_URL_IPv6) {
+		zend_throw_exception(NULL, "Invalid ip version was passed", 0);
+	}
+
+	instance = getThis();
+	zend_update_property_long(url_ce, instance, "ipVersion", sizeof("ipVersion") - 1, ipVersion TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setScheme)
+{
+	zval *instance;
+	char *scheme;
+	int scheme_len;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &scheme, &scheme_len) == FAILURE){
+		return;
+	}
+
+	instance = getThis();
+	zend_update_property_stringl(url_ce, instance, "scheme", sizeof("scheme") - 1, scheme, scheme_len TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setUser)
+{
+	zval *instance;
+	char *user;
+	int user_len;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &user, &user_len) == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	zend_update_property_stringl(url_ce, instance, "user", sizeof("user") - 1, user, user_len TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setPass)
+{
+	zval *instance;
+	char *pass;
+	int pass_len;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &pass, &pass_len) == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	zend_update_property_stringl(url_ce, instance, "pass", sizeof("pass") - 1, pass, pass_len TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setHost)
+{
+	zval *instance;
+	char *host;
+	int host_len;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &host, &host_len) == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	zend_update_property_stringl(url_ce, instance, "host", sizeof("host") - 1, host, host_len TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setPort)
+{
+	zval *instance;
+	long port;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &port) == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	zend_update_property_long(url_ce, instance, "port", sizeof("port") - 1, port TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setPath)
+{
+	zval *instance;
+	char *path;
+	int path_len;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &path, &path_len) == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	zend_update_property_stringl(url_ce, instance, "path", sizeof("path") - 1, path, path_len TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setQuery)
+{
+	zval *instance, *zv_query, *prop_query, tmp;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &zv_query) == FAILURE) {
+		return;
+	}
+
+	switch (Z_TYPE_P(zv_query)) {
+		case IS_STRING: ;
+			char *query_str = estrdup(Z_STRVAL_P(zv_query));
+			array_init(&tmp);
+			sapi_module.treat_data(PARSE_STRING, query_str, &tmp TSRMLS_CC);
+			prop_query = &tmp;
+			break;
+		case IS_ARRAY:
+			prop_query = zv_query;
+			Z_ADDREF_P(zv_query);
+		case IS_OBJECT:
+			array_init(&tmp);
+			Z_ARRVAL(tmp) = HASH_OF(zv_query);
+			prop_query = &tmp;
+			break;
+		default:
+			zend_throw_exception(NULL, "Invalid type passed for query", 0);
+			break;
+	}
+
+	instance = getThis();
+	zend_update_property(url_ce, instance, "queryVariables", sizeof("queryVariables") - 1, prop_query TSRMLS_CC);
+}
+
+PHP_METHOD(Url, setFragment)
+{
+	zval *instance;
+	char *fragment;
+	int fragment_len;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &fragment, &fragment_len) == FAILURE) {
+		return;
+	}
+
+	instance = getThis();
+	zend_update_property_stringl(url_ce, instance, "fragment", sizeof("fragment") - 1, fragment, fragment_len TSRMLS_CC);
+}
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_void, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_enc_type, 0, 0, 1)
+	ZEND_ARG_INFO(0, encType)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_ip_version, 0, 0, 1)
+	ZEND_ARG_INFO(0, ipVersion)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_scheme, 0, 0, 1)
+	ZEND_ARG_INFO(0, scheme)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_user, 0, 0, 1)
+	ZEND_ARG_INFO(0, user)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_pass, 0, 0, 1)
+	ZEND_ARG_INFO(0, pass)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_host, 0, 0, 1)
+	ZEND_ARG_INFO(0, host)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_port, 0, 0, 1)
+	ZEND_ARG_INFO(0, port)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_path, 0, 0, 1)
+	ZEND_ARG_INFO(0, path)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_query, 0, 0, 1)
+	ZEND_ARG_INFO(0, query)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_fragment, 0, 0, 1)
+	ZEND_ARG_INFO(0, fragment)
+ZEND_END_ARG_INFO()
+
+static const zend_function_entry url_functions[] = {
+	PHP_ME(Url, __toString, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getEncType, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getIpVersion, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getScheme, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getUser, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getRawUser, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getPass, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getRawPass, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getHost, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getPort, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getPath, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getRawPath, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getQueryString, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getQueryVariables, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getQueryVariable, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getFragment, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, getRawFragment, arginfo_void, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setEncType, arginfo_set_enc_type, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setIpVersion, arginfo_set_ip_version, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setScheme, arginfo_set_scheme, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setUser, arginfo_set_user, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setPass, arginfo_set_pass, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setHost, arginfo_set_host, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setPort, arginfo_set_port, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setPath, arginfo_set_path, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setQuery, arginfo_set_query, ZEND_ACC_PUBLIC)
+	PHP_ME(Url, setFragment, arginfo_set_fragment, ZEND_ACC_PUBLIC)
+	PHP_FE_END
+};
+
+PHP_MINIT_FUNCTION(url)
+{
+	zend_class_entry tmp_ce;
+	INIT_CLASS_ENTRY(tmp_ce, "Url", url_functions);
+	url_ce = zend_register_internal_class(&tmp_ce TSRMLS_CC);
+	zend_declare_property_long(url_ce, "encType", sizeof("encType") - 1, PHP_QUERY_RFC3986, ZEND_ACC_PRIVATE TSRMLS_CC);
+
+	return SUCCESS;
+}
 
 /*
  * Local variables:
